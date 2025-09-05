@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HEIC → JPEG Dönüştürücü (Çoklu + Önizleme + ZIP)</title>
+  <style>
+    :root{
+      --bg:#0b0e14; --panel:#131826; --muted:#8a93a6; --text:#e7eaf1; --accent:#7aa2f7; --accent2:#98c379; --warn:#ffb86c; --err:#ff6b6b;
+      --radius:16px;
+    }
+    body{margin:0; font-family:sans-serif; background:var(--bg); color:var(--text);}
+    .wrap{max-width:1100px; margin:32px auto; padding:0 16px;}
+    .card{background:var(--panel); border-radius:var(--radius); padding:18px;}
+    h1{margin:0 0 6px;}
+    p.muted{color:var(--muted);}
+    .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:14px 0}
+    .btn{border:none; background:var(--accent); color:#0b0e14; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer}
+    .btn.secondary{background:#222a3f; color:var(--text);}
+    .btn.ghost{background:transparent; border:1px solid #2a3555; color:var(--text)}
+    input[type="file"]{display:none}
+    label.file{padding:10px 14px; border-radius:12px; border:1px dashed #31406b; cursor:pointer; background:#1a2135}
+    .drop{border:2px dashed #31406b; border-radius:var(--radius); padding:22px; text-align:center; margin:12px 0; background:#0f1526}
+    .drop.drag{border-color:var(--accent);}
+    .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin-top:12px}
+    .tile{background:#0e1324; border-radius:12px; overflow:hidden; display:flex; flex-direction:column}
+    .thumb{aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; background:#0b1120;}
+    .thumb img{max-width:100%; max-height:100%}
+    .meta{padding:10px;}
+    .status{font-size:12px; padding:2px 8px; border-radius:999px; display:inline-block}
+    .s-wait{background:#1e2742;} .s-work{background:#2a3b6b;} .s-ok{background:#173827;} .s-err{background:#3b1f26;}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>HEIC → JPEG Dönüştürücü</h1>
+    <p class="muted">Çoklu seçim, önizleme ve toplu ZIP indirme. Tümü tarayıcı içinde çalışır.</p>
+
+    <div class="row">
+      <label class="file">
+        <input id="fileInput" type="file" accept=".heic,.HEIC,image/heic" multiple />
+        HEIC dosyaları seç
+      </label>
+      <button id="convertBtn" class="btn" disabled>Dönüştür</button>
+      <button id="zipBtn" class="btn secondary" disabled>ZIP indir</button>
+      <span id="status">Hazır</span>
+    </div>
+
+    <div id="drop" class="drop">Dosyaları buraya sürükle-bırak</div>
+    <div class="row">
+      <label>Kalite: <input id="quality" type="range" min="40" max="100" value="90" /> <span id="qOut">90</span>%</label>
+    </div>
+    <div id="grid" class="grid"></div>
+  </div>
+</div>
+
+<!-- Libs -->
+<script src="https://unpkg.com/heic2any/dist/heic2any.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+<script>
+const fileInput=document.getElementById('fileInput');
+const drop=document.getElementById('drop');
+const convertBtn=document.getElementById('convertBtn');
+const zipBtn=document.getElementById('zipBtn');
+const qRange=document.getElementById('quality');
+const qOut=document.getElementById('qOut');
+const statusEl=document.getElementById('status');
+const grid=document.getElementById('grid');
+
+qRange.addEventListener('input',()=>qOut.textContent=qRange.value);
+
+let items=[];
+function makeTile(file){
+  const div=document.createElement('div');div.className='tile';
+  const th=document.createElement('div');th.className='thumb';
+  const img=document.createElement('img');img.style.display='none';th.appendChild(img);div.appendChild(th);
+  const meta=document.createElement('div');meta.className='meta';
+  const name=document.createElement('div');name.textContent=file.name;meta.appendChild(name);
+  const st=document.createElement('span');st.className='status s-wait';st.textContent='Beklemede';meta.appendChild(st);
+  const dl=document.createElement('button');dl.textContent='İndir';dl.className='btn ghost';dl.disabled=true;meta.appendChild(dl);
+  div.appendChild(meta);
+  return {el:div,img,st,dl,file,outName:file.name.replace(/\.[^.]+$/,'')+'.jpeg',jpeg:null};
+}
+function setFiles(fs){
+  items=[...fs].map(f=>makeTile(f));
+  grid.innerHTML='';items.forEach(it=>grid.appendChild(it.el));
+  convertBtn.disabled=items.length===0;
+}
+fileInput.onchange=e=>setFiles(e.target.files);
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+drop.ondrop=e=>{if(e.dataTransfer.files) setFiles(e.dataTransfer.files);};
+
+async function convertOne(it){
+  it.st.className='status s-work';it.st.textContent='Dönüştürülüyor…';
+  try{
+    const blob=await heic2any({blob:it.file,toType:'image/jpeg',quality:Number(qRange.value)/100});
+    it.jpeg=blob;
+    const url=URL.createObjectURL(blob);
+    it.img.src=url;it.img.style.display='block';
+    it.st.className='status s-ok';it.st.textContent='Hazır';
+    it.dl.disabled=false;
+    it.dl.onclick=()=>saveAs(blob,it.outName);
+  }catch(err){
+    it.st.className='status s-err';it.st.textContent='Hata';
+  }
+}
+async function convertAll(){
+  statusEl.textContent='Dönüştürülüyor…';
+  for(const it of items) await convertOne(it);
+  statusEl.textContent='Tamamlandı';
+  zipBtn.disabled=items.some(it=>it.jpeg);
+}
+async function zipAll(){
+  const zip=new JSZip();
+  items.forEach(it=>{if(it.jpeg) zip.file(it.outName,it.jpeg);});
+  const blob=await zip.generateAsync({type:'blob'});
+  saveAs(blob,'converted.zip');
+}
+convertBtn.onclick=convertAll;
+zipBtn.onclick=zipAll;
+</script>
+</body>
+</html>
